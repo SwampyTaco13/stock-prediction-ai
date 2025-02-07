@@ -2,6 +2,13 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 import tensorflow as tf
+
+# Limit TensorFlow memory usage to avoid crashes
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
@@ -63,5 +70,8 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000, debug=True)
+import os
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))  # Render assigns a PORT dynamically
+    app.run(host="0.0.0.0", port=port)
