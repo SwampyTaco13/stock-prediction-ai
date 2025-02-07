@@ -2,7 +2,7 @@ flask
 flask-cors
 tensorflow==2.14.0  # Explicit version to prevent GPU issues
 pandas
-numpy
+numpy<2.0  # Pinning NumPy to avoid breaking TensorFlow
 yfinance
 scikit-learn
 matplotlib
