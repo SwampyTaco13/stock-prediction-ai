@@ -2,6 +2,18 @@ import os
 import numpy as np
 import pandas as pd
 import yfinance as yf
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force TensorFlow to use CPU
+
+import tensorflow as tf
+
+# Restrict TensorFlow memory usage
+physical_devices = tf.config.list_physical_devices('CPU')
+if physical_devices:
+    try:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    except:
+        pass  # Memory growth setting failed, continue without it
 import tensorflow as tf
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -76,6 +88,6 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Default to port 5000 for Render
-    app.run(host="0.0.0.0", port=port, debug=True)
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))  # Get port from Render or default to 5000
+    app.run(host='0.0.0.0', port=port, debug=True)
