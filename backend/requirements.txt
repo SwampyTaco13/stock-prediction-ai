@@ -1,6 +1,6 @@
 flask
 flask-cors
-tensorflow
+tensorflow==2.14.0  # Explicit version to prevent GPU issues
 pandas
 numpy
 yfinance
