@@ -1,53 +1,67 @@
-import React, { useState, useEffect } from "react";
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
-export default function StockDashboard() {
-  const [ticker, setTicker] = useState("AAPL");
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  
-  const fetchStockPrediction = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`http://localhost:5000/predict?ticker=${ticker}`);
-      const result = await response.json();
-      setData(result);
-    } catch (error) {
-      console.error("Error fetching prediction:", error);
-    }
-    setLoading(false);
-  };
+# Flask app setup
+app = Flask(__name__)
+CORS(app)
 
-  useEffect(() => {
-    fetchStockPrediction();
-  }, [ticker]);
-  
-  return (
-    <div className="p-4 max-w-xl mx-auto text-center">
-      <h1 className="text-xl font-bold">AI Stock Prediction Dashboard</h1>
-      <div className="mt-4">
-        <input
-          type="text"
-          value={ticker}
-          onChange={(e) => setTicker(e.target.value.toUpperCase())}
-          className="border p-2 rounded w-1/2"
-          placeholder="Enter stock ticker (e.g., AAPL)"
-        />
-        <button
-          onClick={fetchStockPrediction}
-          className="ml-2 px-4 py-2 bg-blue-500 text-white rounded"
-        >
-          Fetch Prediction
-        </button>
-      </div>
-      {loading && <p className="mt-4">Loading...</p>}
-      {data && (
-        <div className="mt-4 border p-4 rounded shadow">
-          <p><strong>Ticker:</strong> {data.ticker}</p>
-          <p><strong>Predicted Price:</strong> ${data.predicted_price}</p>
-          <p><strong>Current Price:</strong> ${data.current_price}</p>
-          <p><strong>Recommendation:</strong> {data.recommendation}</p>
-        </div>
-      )}
-    </div>
-  );
-}
+# Load and preprocess data
+def load_data(stock_symbol, look_back=60):
+    df = yf.download(stock_symbol, period="2y", interval="1d")
+    data = df['Close'].values.reshape(-1, 1)
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data)
+    
+    X, y = [], []
+    for i in range(look_back, len(scaled_data)):
+        X.append(scaled_data[i-look_back:i, 0])
+        y.append(scaled_data[i, 0])
+    
+    return np.array(X), np.array(y), scaler
+
+# Build LSTM model
+def build_model(input_shape):
+    model = Sequential([
+        LSTM(units=50, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(units=50, return_sequences=False),
+        Dropout(0.2),
+        Dense(units=1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    try:
+        data = request.get_json()
+        stock_symbol = data['symbol']
+        
+        # Load data
+        look_back = 60
+        X, y, scaler = load_data(stock_symbol, look_back)
+        X = X.reshape(X.shape[0], X.shape[1], 1)
+        
+        # Train model
+        model = build_model((X.shape[1], 1))
+        model.fit(X, y, epochs=10, batch_size=16, verbose=0)
+        
+        # Predict next value
+        last_sequence = X[-1].reshape(1, look_back, 1)
+        predicted_price = model.predict(last_sequence)
+        predicted_price = scaler.inverse_transform(predicted_price.reshape(-1, 1))[0, 0]
+        
+        return jsonify({"symbol": stock_symbol, "predicted_price": predicted_price})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000, debug=True)
