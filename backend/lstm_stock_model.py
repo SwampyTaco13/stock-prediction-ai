@@ -64,29 +64,26 @@ def home():
 def predict():
     try:
         data = request.get_json()
-
-        # Validate input
-        if not data or "symbol" not in data:
-            return jsonify({"error": "Stock symbol is required"}), 400
-        
         stock_symbol = data['symbol']
-        if not isinstance(stock_symbol, str) or not stock_symbol.strip():
-            return jsonify({"error": "Invalid stock symbol"}), 400
-
-        # Load data and reshape
+        
+        # Load data
         look_back = 60
-        X, _, scaler = load_data(stock_symbol, look_back)
+        X, y, scaler = load_data(stock_symbol, look_back)
         X = X.reshape(X.shape[0], X.shape[1], 1)
-
-        # Predict next price (without retraining)
+        
+        # Train model
+        model = build_model((X.shape[1], 1))
+        model.fit(X, y, epochs=10, batch_size=16, verbose=0)
+        
+        # Predict next value
         last_sequence = X[-1].reshape(1, look_back, 1)
         predicted_price = model.predict(last_sequence)
-        predicted_price = scaler.inverse_transform(predicted_price.reshape(-1, 1))[0, 0]
-
+        predicted_price = float(scaler.inverse_transform(predicted_price.reshape(-1, 1))[0, 0])  # Convert to float
+        
         return jsonify({"symbol": stock_symbol, "predicted_price": predicted_price})
-
+    
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))  # Ensure it binds to the correct port
