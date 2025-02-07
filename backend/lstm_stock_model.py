@@ -1,110 +1,81 @@
+import os
 import numpy as np
 import pandas as pd
+import yfinance as yf
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout, GRU
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
-import yfinance as yf
-import time
-import logging
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-
-logging.basicConfig(filename='stock_predictions.log', level=logging.INFO, format='%(asctime)s - %(message)s')
 
 app = Flask(__name__)
 CORS(app)
 
-def fetch_stock_data(ticker='AAPL', start_date='2020-01-01', end_date='2025-01-01'):
-    data = yf.download(ticker, start=start_date, end=end_date)
-    data = data[['Close', 'Volume']]
-    data.dropna(inplace=True)
-    return data
+# Load stock data
+def load_stock_data(ticker):
+    data = yf.download(ticker, start="2020-01-01", end="2025-01-01")
+    return data["Close"].values.reshape(-1, 1)
 
-def fetch_live_stock_data(ticker):
-    data = yf.download(ticker, period='1d', interval='1m')
-    return data[['Close', 'Volume']].iloc[-1]
-
-tickers = ['AAPL', 'GOOGL', 'MSFT', 'TSLA']
-
-historical_data = {ticker: fetch_stock_data(ticker) for ticker in tickers}
-
-scalers = {}
-for ticker, data in historical_data.items():
+# Preprocess data
+def preprocess_data(data):
     scaler = MinMaxScaler(feature_range=(0, 1))
-    data[['Scaled_Close', 'Scaled_Volume']] = scaler.fit_transform(data[['Close', 'Volume']])
-    scalers[ticker] = scaler
+    scaled_data = scaler.fit_transform(data)
+    return scaled_data, scaler
 
-def create_sequences(data, seq_length=50):
-    X, y = [], []
-    for i in range(seq_length, len(data)):
-        X.append(data[i-seq_length:i])
-        y.append(data[i, 0])
-    return np.array(X), np.array(y)
+# Create sequences
+def create_sequences(data, seq_length):
+    sequences, labels = [], []
+    for i in range(len(data) - seq_length - 1):
+        sequences.append(data[i:i+seq_length])
+        labels.append(data[i+seq_length])
+    return np.array(sequences), np.array(labels)
 
-seq_length = 50
-training_data = {}
-for ticker, data in historical_data.items():
-    values = data[['Scaled_Close', 'Scaled_Volume']].values
-    X, y = create_sequences(values, seq_length)
-    training_data[ticker] = (X, y, values)
+# Build LSTM model
+def build_model(input_shape):
+    model = tf.keras.Sequential([
+        tf.keras.layers.LSTM(50, return_sequences=True, input_shape=input_shape),
+        tf.keras.layers.LSTM(50),
+        tf.keras.layers.Dense(25),
+        tf.keras.layers.Dense(1)
+    ])
+    model.compile(optimizer="adam", loss="mean_squared_error")
+    return model
 
-model = Sequential([
-    GRU(units=64, return_sequences=True, input_shape=(seq_length, 2)),
-    Dropout(0.2),
-    GRU(units=64, return_sequences=False),
-    Dropout(0.2),
-    Dense(units=32),
-    Dense(units=1)
-])
-
-model.compile(optimizer='adam', loss='mean_squared_error')
-
-X, y, _ = training_data['AAPL']
-# model.fit(X, y, epochs=10, batch_size=32, verbose=1, validation_split=0.2)
-
-def predict_next_point(model, latest_data, scaler):
-    data_reshaped = np.reshape(latest_data, (1, len(latest_data), latest_data.shape[1]))
-    scaled_prediction = model.predict(data_reshaped)
-    return scaler.inverse_transform([[scaled_prediction[0, 0], 0]])[0, 0]
-
-def generate_recommendation(predicted_price, current_price):
-    threshold = 0.02
-    change_percentage = (predicted_price - current_price) / current_price
-    if change_percentage > threshold:
-        return "Buy"
-    elif change_percentage < -threshold:
-        return "Sell"
-    else:
-        return "Hold"
-
-@app.route('/predict', methods=['GET'])
-def get_prediction():
-    ticker = request.args.get('ticker', default='AAPL', type=str)
-    if ticker not in tickers:
-        return jsonify({"error": "Ticker not supported"}), 400
+# Train the model
+def train_model(ticker):
+    data = load_stock_data(ticker)
+    scaled_data, scaler = preprocess_data(data)
     
-    live_data = fetch_live_stock_data(ticker)
-    scaler = scalers[ticker]
-    values = training_data[ticker][2]
-    scaled_live_data = scaler.transform([[live_data['Close'], live_data['Volume']]])
-    latest_data = np.vstack([values[-(seq_length - 1):], scaled_live_data])
-    prediction = predict_next_point(model, latest_data, scaler)
-    recommendation = generate_recommendation(prediction, live_data['Close'])
-    
-    response = {
-        "ticker": ticker,
-        "predicted_price": round(prediction, 2),
-        "current_price": round(live_data['Close'], 2),
-        "recommendation": recommendation
-    }
-    
-    logging.info(f"API Prediction - {response}")
-    return jsonify(response)
+    seq_length = 60
+    X, y = create_sequences(scaled_data, seq_length)
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
 
-import os
+    model = build_model((seq_length, 1))
+    model.fit(X, y, epochs=10, batch_size=32, verbose=1)
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))  # Get Render's assigned port
-    app.run(debug=True, host='0.0.0.0', port=port)
+    return model, scaler, data
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    try:
+        data = request.json
+        ticker = data.get("ticker", "AAPL")
+
+        model, scaler, stock_data = train_model(ticker)
+
+        last_60_days = stock_data[-60:].reshape(-1, 1)
+        last_60_days_scaled = scaler.transform(last_60_days)
+        X_test = np.array([last_60_days_scaled])
+        X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+
+        predicted_price = model.predict(X_test)
+        predicted_price = scaler.inverse_transform(predicted_price)
+
+        return jsonify({"ticker": ticker, "predicted_price": predicted_price.tolist()})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))  # Default to port 5000 for Render
+    app.run(host="0.0.0.0", port=port, debug=True)
