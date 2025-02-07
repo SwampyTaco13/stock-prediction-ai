@@ -62,7 +62,7 @@ model = Sequential([
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 X, y, _ = training_data['AAPL']
-model.fit(X, y, epochs=10, batch_size=32, verbose=1, validation_split=0.2)
+# model.fit(X, y, epochs=10, batch_size=32, verbose=1, validation_split=0.2)
 
 def predict_next_point(model, latest_data, scaler):
     data_reshaped = np.reshape(latest_data, (1, len(latest_data), latest_data.shape[1]))
@@ -103,5 +103,8 @@ def get_prediction():
     logging.info(f"API Prediction - {response}")
     return jsonify(response)
 
+import os
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get('PORT', 5000))  # Get Render's assigned port
+    app.run(debug=True, host='0.0.0.0', port=port)
