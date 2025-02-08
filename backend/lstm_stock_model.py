@@ -8,8 +8,10 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from sklearn.preprocessing import MinMaxScaler
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # <-- Import this to handle CORS
 
 app = Flask(__name__)
+CORS(app)  # <-- Allow frontend to communicate with the backend
 
 # Ensure the model directory exists
 MODEL_WEIGHTS_PATH = "lstm_model_weights.h5"
